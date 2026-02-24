@@ -1,0 +1,47 @@
+version: "3.8"
+
+services:
+  # InfluxDB - เก็บ metrics จาก k6
+  influxdb:
+    image: influxdb:2.7
+    container_name: loadtest-influxdb
+    ports:
+      - "8086:8086"
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=adminpassword
+      - DOCKER_INFLUXDB_INIT_ORG=loadtest
+      - DOCKER_INFLUXDB_INIT_BUCKET=k6
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=my-super-secret-token
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+    networks:
+      - loadtest-network
+
+  # Grafana - แสดง Dashboard
+  grafana:
+    image: grafana/grafana:latest
+    container_name: loadtest-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    depends_on:
+      - influxdb
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - loadtest-network
+
+volumes:
+  influxdb-data:
+  grafana-data:
+
+networks:
+  loadtest-network:
+    driver: bridge

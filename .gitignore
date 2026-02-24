@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+backend/venv/
+backend-next/node_modules/
+frontend/node_modules/
+
+# Build output
+frontend/dist/
+backend-next/.next/
+
+# Environment files
+.env
+.env.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Archives / Large files
+*.rar
+*.zip
+*.tar.gz
+*.7z
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+*.log
+npm-debug.log*
+
+# k6 temp scripts
+/tmp/

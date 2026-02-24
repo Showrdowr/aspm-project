@@ -1,0 +1,77 @@
+# Real-time Load Test Progress Feature
+
+## Overview
+ปัจจุบันระบบรอจนกว่าการทดสอบจะเสร็จถึงแสดงผล ผู้ใช้ต้องการเห็น **real-time progress** ระหว่างที่ Locust กำลังทดสอบ
+
+## Proposed Approach: Server-Sent Events (SSE)
+
+ใช้ SSE (Server-Sent Events) เพราะ:
+- ✅ Simple ไม่ต้องติดตั้ง library เพิ่ม
+- ✅ FastAPI รองรับ SSE ด้วย `StreamingResponse`
+- ✅ Frontend ใช้ `EventSource` API ได้เลย
+
+---
+
+## Proposed Changes
+
+### Backend
+
+#### [MODIFY] [main.py](file:///c:/xampp/htdocs/NewProject/backend/main.py)
+
+1. **เพิ่ม API endpoint ใหม่**: `/test/start-stream`
+   - ใช้ `StreamingResponse` แทน response ปกติ
+   - รัน Locust ด้วย `subprocess.Popen` (non-blocking) แทน `subprocess.run`
+   - อ่านไฟล์ [test_result_stats_history.csv](file:///c:/xampp/htdocs/NewProject/backend/test_result_stats_history.csv) ทุก 1 วินาที และส่ง progress ไปให้ Frontend
+
+2. **ข้อมูลที่ส่ง real-time**:
+   - `elapsed_seconds` - เวลาที่ผ่านไป
+   - `total_seconds` - เวลาที่ตั้งไว้ทั้งหมด
+   - `current_users` - จำนวน users ที่กำลังทดสอบ
+   - `requests_per_sec` - Request ต่อวินาที
+   - `current_response_time` - Response time ปัจจุบัน
+   - `current_error_rate` - Error rate ปัจจุบัน
+
+---
+
+### Frontend
+
+#### [MODIFY] [LoadTest.tsx](file:///c:/xampp/htdocs/NewProject/frontend/src/LoadTest.tsx)
+
+1. **เพิ่ม State สำหรับ progress**:
+   ```tsx
+   const [progress, setProgress] = useState({
+     elapsed: 0,
+     total: 0,
+     requestsPerSec: 0,
+     currentResponseTime: 0,
+     currentErrorRate: 0
+   });
+   ```
+
+2. **เปลี่ยนจาก axios POST เป็น EventSource**:
+   ```tsx
+   const eventSource = new EventSource(`http://127.0.0.1:8000/test/start-stream?...params`);
+   eventSource.onmessage = (event) => {
+     const data = JSON.parse(event.data);
+     setProgress(data);
+   };
+   ```
+
+3. **เพิ่ม UI แสดง Progress**:
+   - Progress bar แสดง % ความคืบหน้า
+   - แสดงค่า real-time: Requests/sec, Response Time ปัจจุบัน
+   - Animation ที่ดูน่าสนใจ
+
+---
+
+## Verification Plan
+
+### Manual Testing
+1. เริ่ม Load Test ด้วย URL ที่ถูกต้อง → ดู progress bar เคลื่อนไหว
+2. ตรวจสอบว่าค่า Response Time และ Requests/sec อัปเดตทุกวินาที
+3. รอจนจบ → ดูผลลัพธ์สุดท้ายแสดงถูกต้อง
+
+---
+
+> [!IMPORTANT]
+> การเพิ่ม Real-time progress จะทำให้โค้ดซับซ้อนขึ้น แต่ประสบการณ์ผู้ใช้จะดีขึ้นมาก
