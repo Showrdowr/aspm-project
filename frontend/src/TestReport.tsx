@@ -3,8 +3,11 @@ import axios from 'axios';
 import {
   FileText, ClipboardCheck, Target, Server,
   Clock, CheckCircle, XCircle,
-  TrendingUp, Zap, Save, ChevronDown, ChevronUp
+  TrendingUp, Zap, Save, ChevronDown, ChevronUp, Trash2, Download
 } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { sarabunBase64 } from './fonts/sarabun-base64';
 
 interface ReportData {
   // จาก complete event ของ SSE
@@ -14,6 +17,7 @@ interface ReportData {
   duration: number;
   status: string;
   avg_response_time: number;
+  median_response_time: number;
   p95_response_time: number;
   p99_response_time: number;
   max_response_time: number;
@@ -27,6 +31,7 @@ interface ReportData {
 interface SavedReport {
   id: number;
   test_history_id: number;
+  report_name: string;
   tester_name: string;
   test_objective: string;
   environment: string;
@@ -37,6 +42,7 @@ interface SavedReport {
   avg_response_time: number;
   error_rate: number;
   test_status: string;
+  median_response_time: number;
   p95_response_time: number;
   p99_response_time: number;
   max_response_time: number;
@@ -63,7 +69,7 @@ function generateConclusion(data: ReportData): string {
     parts.push(`ระบบมี error rate ${data.error_rate}% ซึ่งสูงเกินเกณฑ์`);
   }
   
-  parts.push(`Average response time: ${data.avg_response_time}ms, P95: ${data.p95_response_time}ms`);
+  parts.push(`Average response time: ${data.avg_response_time}ms, Median: ${data.median_response_time}ms, P95: ${data.p95_response_time}ms`);
   
   if (data.avg_response_time < 200) {
     parts.push(`Response time อยู่ในเกณฑ์ดีมาก (< 200ms)`);
@@ -108,9 +114,30 @@ export default function TestReport() {
   const [environment, setEnvironment] = useState('Development');
   const [slaResponseTime, setSlaResponseTime] = useState(500);
   const [slaErrorRate, setSlaErrorRate] = useState(1);
+  const [description, setDescription] = useState('');
+  const [recommendations, setRecommendations] = useState('');
+  const [reportName, setReportName] = useState('');
 
   useEffect(() => {
     fetchSavedReports();
+
+    // ตรวจสอบว่ามีข้อมูล report ที่ส่งมาจากหน้า test หรือไม่
+    const pendingData = localStorage.getItem('pendingReportData');
+    if (pendingData) {
+      try {
+        const data = JSON.parse(pendingData) as ReportData;
+        setReportData(data);
+        setShowForm(true);
+        setSaveSuccess(false);
+        setTestObjective(`Test ${data.test_type} for ${data.target_url}`);
+        setDescription(generateConclusion(data));
+        setRecommendations(generateRecommendations(data));
+        setReportName(`${data.test_type?.toUpperCase()} Test Report`);
+      } catch (err) {
+        console.error('Failed to parse pending report data', err);
+      }
+      localStorage.removeItem('pendingReportData');
+    }
   }, []);
 
   const fetchSavedReports = async () => {
@@ -128,17 +155,6 @@ export default function TestReport() {
     }
   };
 
-  // เรียกจาก LoadTest/StressTest/ScalabilityTest หลัง test เสร็จ
-  const handleGenerateReport = (data: ReportData) => {
-    setReportData(data);
-    setShowForm(true);
-    setSaveSuccess(false);
-    setTestObjective(`ทดสอบ ${data.test_type} สำหรับ ${data.target_url}`);
-  };
-
-  // Expose function สำหรับ parent component
-  (window as unknown as { generateReport: (data: ReportData) => void }).generateReport = handleGenerateReport;
-
   const slaPass = reportData
     ? reportData.avg_response_time <= slaResponseTime && reportData.error_rate <= slaErrorRate
     : false;
@@ -151,9 +167,17 @@ export default function TestReport() {
       const token = localStorage.getItem('token');
       await axios.post('http://localhost:3002/api/test/report', {
         test_history_id: reportData.test_history_id || 0,
+        report_name: reportName,
+        test_type: reportData.test_type || '',
         tester_name: testerName,
+        target_url: reportData.target_url || '',
+        virtual_users: reportData.virtual_users || 0,
+        duration: reportData.duration || 0,
+        avg_response_time: reportData.avg_response_time || 0,
+        error_rate: reportData.error_rate || 0,
         test_objective: testObjective,
         environment,
+        median_response_time: reportData.median_response_time,
         p95_response_time: reportData.p95_response_time,
         p99_response_time: reportData.p99_response_time,
         max_response_time: reportData.max_response_time,
@@ -163,8 +187,8 @@ export default function TestReport() {
         sla_response_time: slaResponseTime,
         sla_error_rate: slaErrorRate,
         sla_pass: slaPass,
-        conclusion: generateConclusion(reportData),
-        recommendations: generateRecommendations(reportData),
+        conclusion: description,
+        recommendations: recommendations,
       }, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -177,6 +201,158 @@ export default function TestReport() {
     } finally {
       setSaving(false);
     }
+  };
+
+  // ลบ Report
+  const handleDelete = async (id: number) => {
+    if (!confirm('ต้องการลบ report นี้หรือไม่?')) return;
+    try {
+      const token = localStorage.getItem('token');
+      await axios.delete(`http://localhost:3002/api/test/report?id=${id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      fetchSavedReports();
+    } catch (err) {
+      console.error('Failed to delete report', err);
+    }
+  };
+
+  // Export PDF
+  const handleExportPDF = (report: SavedReport) => {
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    // Register Thai font
+    doc.addFileToVFS('Sarabun-Regular.ttf', sarabunBase64);
+    doc.addFont('Sarabun-Regular.ttf', 'Sarabun', 'normal');
+    doc.setFont('Sarabun');
+
+    // Helper: round to 2 decimal places
+    const r = (n: number | undefined) => Number((n || 0).toFixed(2));
+
+    // Title
+    doc.setFontSize(20);
+    doc.setTextColor(40, 40, 40);
+    doc.text('Performance Test Report', pageWidth / 2, 20, { align: 'center' });
+
+    // Report Name
+    if (report.report_name) {
+      doc.setFontSize(14);
+      doc.setTextColor(60, 60, 60);
+      doc.text(report.report_name, pageWidth / 2, 28, { align: 'center' });
+    }
+
+    doc.setFontSize(10);
+    doc.setTextColor(120, 120, 120);
+    doc.text(`Generated: ${new Date(report.created_at).toISOString().slice(0, 19).replace('T', ' ')}`, pageWidth / 2, report.report_name ? 35 : 28, { align: 'center' });
+
+    // SLA Badge
+    doc.setFontSize(14);
+    doc.setTextColor(report.sla_pass ? 34 : 239, report.sla_pass ? 197 : 68, report.sla_pass ? 94 : 68);
+    doc.text(`SLA: ${report.sla_pass ? 'PASS' : 'FAIL'}`, pageWidth / 2, report.report_name ? 43 : 36, { align: 'center' });
+
+    // Test Configuration
+    autoTable(doc, {
+      startY: report.report_name ? 49 : 42,
+      head: [['Test Configuration', '']],
+      body: [
+        ['Test Type', report.test_type?.toUpperCase() || 'N/A'],
+        ['Target URL', report.target_url || 'N/A'],
+        ['Virtual Users', String(report.virtual_users || 'N/A')],
+        ['Duration', `${report.duration || 'N/A'}s`],
+        ['Tester', report.tester_name || 'N/A'],
+        ['Environment', report.environment || 'N/A'],
+      ],
+      theme: 'striped',
+      headStyles: { fillColor: [59, 130, 246], fontSize: 11, font: 'Sarabun' },
+      styles: { fontSize: 9, font: 'Sarabun' },
+    });
+
+    // Performance Metrics
+    const metricsY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
+    autoTable(doc, {
+      startY: metricsY,
+      head: [['Metric', 'Value']],
+      body: [
+        ['Avg Response Time', `${r(report.avg_response_time)} ms`],
+        ['Median (p50)', `${r(report.median_response_time)} ms`],
+        ['P95 Response Time', `${r(report.p95_response_time)} ms`],
+        ['P99 Response Time', `${r(report.p99_response_time)} ms`],
+        ['Max Response Time', `${r(report.max_response_time)} ms`],
+        ['Throughput', `${r(report.throughput)} req/s`],
+        ['Total Requests', String(report.total_requests || 0)],
+        ['Failed Requests', String(report.failed_requests || 0)],
+        ['Error Rate', `${r(report.error_rate)}%`],
+      ],
+      theme: 'striped',
+      headStyles: { fillColor: [16, 185, 129], fontSize: 11, font: 'Sarabun' },
+      styles: { fontSize: 9, font: 'Sarabun' },
+    });
+
+    // SLA Criteria
+    const slaY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
+    autoTable(doc, {
+      startY: slaY,
+      head: [['SLA Criteria', 'Threshold', 'Actual', 'Status']],
+      body: [
+        [
+          'Response Time',
+          `<= ${report.sla_response_time} ms`,
+          `${r(report.avg_response_time)} ms`,
+          report.avg_response_time <= report.sla_response_time ? 'PASS' : 'FAIL',
+        ],
+        [
+          'Error Rate',
+          `<= ${report.sla_error_rate}%`,
+          `${r(report.error_rate)}%`,
+          report.error_rate <= report.sla_error_rate ? 'PASS' : 'FAIL',
+        ],
+      ],
+      theme: 'grid',
+      headStyles: { fillColor: [139, 92, 246], fontSize: 10, font: 'Sarabun' },
+      styles: { fontSize: 9, font: 'Sarabun' },
+    });
+
+    // Conclusion & Recommendations
+    let textY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
+
+    if (report.test_objective) {
+      doc.setFontSize(11);
+      doc.setTextColor(40, 40, 40);
+      doc.text('Objective:', 14, textY);
+      doc.setFontSize(9);
+      doc.setTextColor(80, 80, 80);
+      const objLines = doc.splitTextToSize(report.test_objective, pageWidth - 28);
+      doc.text(objLines, 14, textY + 5);
+      textY += 5 + objLines.length * 4 + 4;
+    }
+
+    if (report.conclusion) {
+      doc.setFontSize(11);
+      doc.setTextColor(40, 40, 40);
+      doc.text('Description:', 14, textY);
+      doc.setFontSize(9);
+      doc.setTextColor(80, 80, 80);
+      const conLines = doc.splitTextToSize(report.conclusion, pageWidth - 28);
+      doc.text(conLines, 14, textY + 5);
+      textY += 5 + conLines.length * 4 + 4;
+    }
+
+    if (report.recommendations) {
+      if (textY > 260) { doc.addPage(); textY = 20; }
+      doc.setFontSize(11);
+      doc.setTextColor(40, 40, 40);
+      doc.text('Recommendations:', 14, textY);
+      doc.setFontSize(9);
+      doc.setTextColor(80, 80, 80);
+      const recLines = doc.splitTextToSize(report.recommendations, pageWidth - 28);
+      doc.text(recLines, 14, textY + 5);
+    }
+
+    const safeName = report.report_name
+      ? report.report_name.replace(/[^a-zA-Z0-9ก-๙\s_-]/g, '').replace(/\s+/g, '_')
+      : `report_${report.test_type}_${new Date(report.created_at).toISOString().slice(0, 10)}`;
+    doc.save(`${safeName}.pdf`);
   };
 
   return (
@@ -224,6 +400,7 @@ export default function TestReport() {
           <h3 className="text-sm font-semibold text-gray-400 mb-3 uppercase tracking-wider">Performance Metrics</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <MetricCard label="Avg Response" value={`${reportData.avg_response_time}ms`} color="text-blue-400" />
+            <MetricCard label="Median (p50)" value={`${reportData.median_response_time}ms`} color="text-sky-400" />
             <MetricCard label="P95 Response" value={`${reportData.p95_response_time}ms`} color="text-cyan-400" />
             <MetricCard label="P99 Response" value={`${reportData.p99_response_time}ms`} color="text-indigo-400" />
             <MetricCard label="Max Response" value={`${reportData.max_response_time}ms`} color="text-purple-400" />
@@ -235,6 +412,16 @@ export default function TestReport() {
 
           {/* Form Fields */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            <div className="col-span-1 md:col-span-2 space-y-2">
+              <label className="text-sm text-gray-300 font-medium">Report Name</label>
+              <input
+                type="text"
+                className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                value={reportName}
+                onChange={e => setReportName(e.target.value)}
+                placeholder="e.g. Load Test Report - Sprint 5"
+              />
+            </div>
             <div className="space-y-2">
               <label className="text-sm text-gray-300 font-medium">ชื่อผู้ทดสอบ</label>
               <input
@@ -310,12 +497,28 @@ export default function TestReport() {
             </div>
           </div>
 
-          {/* Auto-generated Content */}
-          <div className="bg-gray-900 rounded-xl p-5 border border-gray-700 mb-6">
-            <h4 className="text-sm font-semibold text-gray-400 mb-2">📝 สรุปผล (Auto-generated)</h4>
-            <p className="text-sm text-gray-300">{generateConclusion(reportData)}</p>
-            <h4 className="text-sm font-semibold text-gray-400 mt-4 mb-2">💡 ข้อแนะนำ</h4>
-            <pre className="text-sm text-gray-300 whitespace-pre-wrap">{generateRecommendations(reportData)}</pre>
+          {/* Description & Recommendations */}
+          <div className="space-y-4 mb-6">
+            <div className="space-y-2">
+              <label className="text-sm text-gray-300 font-medium">📝 Description / Conclusion</label>
+              <textarea
+                className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-emerald-500 outline-none resize-none"
+                rows={4}
+                value={description}
+                onChange={e => setDescription(e.target.value)}
+                placeholder="Describe the test results and conclusions..."
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm text-gray-300 font-medium">💡 Recommendations</label>
+              <textarea
+                className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-emerald-500 outline-none resize-none"
+                rows={4}
+                value={recommendations}
+                onChange={e => setRecommendations(e.target.value)}
+                placeholder="Enter recommendations for improvement..."
+              />
+            </div>
           </div>
 
           {/* Save Button */}
@@ -392,7 +595,6 @@ export default function TestReport() {
                   className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-800/50 transition-colors"
                 >
                   <div className="flex items-center gap-4">
-                    <span className="text-xs font-mono text-gray-500">#{report.id}</span>
                     <span className={`px-2 py-1 rounded text-xs font-semibold ${
                       report.test_type === 'load' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
                       report.test_type === 'stress' ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20' :
@@ -400,13 +602,27 @@ export default function TestReport() {
                     }`}>
                       {report.test_type?.toUpperCase()}
                     </span>
-                    <span className="text-white font-medium truncate max-w-[200px]">{report.target_url}</span>
+                    <span className="text-white font-medium truncate max-w-[200px]">{report.report_name || report.target_url}</span>
                   </div>
                   <div className="flex items-center gap-4">
                     <span className={`text-xs font-bold ${report.sla_pass ? 'text-green-400' : 'text-red-400'}`}>
                       {report.sla_pass ? '✅ PASS' : '❌ FAIL'}
                     </span>
                     <span className="text-xs text-gray-500">{report.tester_name}</span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDelete(report.id); }}
+                      className="p-1 text-gray-500 hover:text-red-400 transition-colors"
+                      title="ลบ Report"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleExportPDF(report); }}
+                      className="p-1 text-gray-500 hover:text-blue-400 transition-colors"
+                      title="Export PDF"
+                    >
+                      <Download className="w-4 h-4" />
+                    </button>
                     {expandedId === report.id ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
                   </div>
                 </div>
@@ -416,6 +632,7 @@ export default function TestReport() {
                   <div className="border-t border-gray-700 p-4 space-y-4 animate-fade-in-up">
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       <MiniMetric label="Avg Response" value={`${report.avg_response_time}ms`} />
+                      <MiniMetric label="Median (p50)" value={`${report.median_response_time || 0}ms`} />
                       <MiniMetric label="P95" value={`${report.p95_response_time}ms`} />
                       <MiniMetric label="P99" value={`${report.p99_response_time}ms`} />
                       <MiniMetric label="Throughput" value={`${report.throughput} req/s`} />

@@ -26,6 +26,7 @@ interface TestResult {
   virtual_users?: number;
   duration?: number;
   test_history_id?: number;
+  median_response_time?: number;
 }
 
 
@@ -33,19 +34,19 @@ interface TestResult {
 export default function LoadTest() {
   // --- State Management ---
   const [formData, setFormData] = useState({
-    target_url: 'http://localhost:5173', // ค่า Default
-    virtual_users: 10,
-    duration: 5,
+    target_url: '', // ค่าเริ่มต้นว่าง
+    virtual_users: 0,
+    duration: 0,
     test_type: "load",
     // Stress test params
-    max_users: 50,
-    ramp_up_duration: 10,
-    hold_duration: 30,
+    max_users: 0,
+    ramp_up_duration: 0,
+    hold_duration: 0,
     // Scalability test params
-    start_users: 10,
-    end_users: 50,
-    step_size: 10,
-    step_duration: 10,
+    start_users: 0,
+    end_users: 0,
+    step_size: 0,
+    step_duration: 0,
   });
   
   const [loading, setLoading] = useState(false);
@@ -62,6 +63,10 @@ export default function LoadTest() {
     requests_per_sec: 0,
     current_response_time: 0,
     current_error_rate: 0,
+    median_response_time: 0,
+    p95_response_time: 0,
+    p99_response_time: 0,
+    throughput: 0,
     total_requests: 0
   });
 
@@ -69,6 +74,7 @@ export default function LoadTest() {
   const [progressHistory, setProgressHistory] = useState<{
     time: number;
     responseTime: number;
+    p95: number;
     errorRate: number;
     rps: number;
     users: number;
@@ -94,7 +100,7 @@ export default function LoadTest() {
     
     setLoading(true);
     setCurrentResult(null);
-    setProgress({ percent: 0, elapsed: 0, total: formData.duration, current_users: 0, requests_per_sec: 0, current_response_time: 0, current_error_rate: 0, total_requests: 0 });
+    setProgress({ percent: 0, elapsed: 0, total: formData.duration, current_users: 0, requests_per_sec: 0, current_response_time: 0, current_error_rate: 0, median_response_time: 0, p95_response_time: 0, p99_response_time: 0, throughput: 0, total_requests: 0 });
     setProgressHistory([]);
 
     const token = localStorage.getItem("token");
@@ -122,21 +128,13 @@ export default function LoadTest() {
       const data = JSON.parse(event.data);
       
       if (data.type === "progress") {
-        setProgress({
-          percent: data.percent,
-          elapsed: data.elapsed,
-          total: data.total,
-          current_users: data.current_users,
-          requests_per_sec: data.requests_per_sec,
-          current_response_time: data.current_response_time,
-          current_error_rate: data.current_error_rate,
-          total_requests: data.total_requests || 0
-        });
+        setProgress(prev => ({ ...prev, ...data }));
         
         // เก็บประวัติสำหรับกราฟ real-time
         setProgressHistory(prev => [...prev, {
           time: data.elapsed,
           responseTime: data.current_response_time,
+          p95: data.p95_response_time,
           errorRate: data.current_error_rate,
           rps: data.requests_per_sec,
           users: data.current_users
@@ -170,26 +168,27 @@ export default function LoadTest() {
   const handleGenerateReport = () => {
     if (!currentResult) return;
     
-    const genReport = (window as unknown as { generateReport?: (data: unknown) => void }).generateReport;
-    if (genReport) {
-      genReport({
-        test_type: currentResult.test_type || formData.test_type,
-        target_url: currentResult.target_url || formData.target_url,
-        virtual_users: currentResult.virtual_users || formData.virtual_users,
-        duration: currentResult.duration || formData.duration,
-        status: currentResult.status,
-        avg_response_time: currentResult.avg_response_time,
-        min_response_time: currentResult.min_response_time || 0,
-        p95_response_time: currentResult.p95_response_time || 0,
-        p99_response_time: currentResult.p99_response_time || 0,
-        max_response_time: currentResult.max_response_time || 0,
-        throughput: currentResult.throughput || 0,
-        total_requests: currentResult.total_requests || 0,
-        failed_requests: currentResult.failed_requests || 0,
-        error_rate: currentResult.error_rate,
-        test_history_id: currentResult.test_history_id || 0,
-      });
-    }
+    const reportData = {
+      test_type: currentResult.test_type || formData.test_type,
+      target_url: currentResult.target_url || formData.target_url,
+      virtual_users: currentResult.virtual_users || formData.virtual_users,
+      duration: currentResult.duration || formData.duration,
+      status: currentResult.status,
+      avg_response_time: currentResult.avg_response_time,
+      min_response_time: currentResult.min_response_time || 0,
+      median_response_time: currentResult.median_response_time || 0,
+      p95_response_time: currentResult.p95_response_time || 0,
+      p99_response_time: currentResult.p99_response_time || 0,
+      max_response_time: currentResult.max_response_time || 0,
+      throughput: currentResult.throughput || 0,
+      total_requests: currentResult.total_requests || 0,
+      failed_requests: currentResult.failed_requests || 0,
+      error_rate: currentResult.error_rate,
+      test_history_id: currentResult.test_history_id || 0,
+    };
+
+    // เก็บข้อมูลใน localStorage เพื่อส่งไปหน้า Report
+    localStorage.setItem('pendingReportData', JSON.stringify(reportData));
 
     // Navigate ไปหน้า Report
     window.dispatchEvent(new CustomEvent('navigate', { detail: 'report' }));
@@ -224,247 +223,40 @@ export default function LoadTest() {
               />
             </div>
 
-            {/* Test Type Selector */}
-            <div className="col-span-1 md:col-span-2 space-y-2">
+            {/* Virtual Users */}
+            <div className="space-y-2">
               <label className="text-sm font-medium text-gray-300 flex items-center">
-                <Zap className="w-4 h-4 mr-2 text-yellow-400" /> Test Type
+                <Users className="w-4 h-4 mr-2 text-purple-400" /> Virtual Users
               </label>
-              <div className="grid grid-cols-3 gap-3">
-                <button
-                  type="button"
-                  onClick={() => setFormData({...formData, test_type: 'load'})}
-                  className={`py-3 px-4 rounded-xl text-sm font-semibold transition-all border ${
-                    formData.test_type === 'load'
-                      ? 'bg-purple-600 border-purple-500 text-white shadow-lg shadow-purple-500/20'
-                      : 'bg-gray-900 border-gray-600 text-gray-400 hover:border-gray-500'
-                  }`}
-                >
-                  ⚡ Load Test
-                  <p className="text-xs mt-1 font-normal opacity-70">Constant users</p>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFormData({...formData, test_type: 'stress'})}
-                  className={`py-3 px-4 rounded-xl text-sm font-semibold transition-all border ${
-                    formData.test_type === 'stress'
-                      ? 'bg-red-600 border-red-500 text-white shadow-lg shadow-red-500/20'
-                      : 'bg-gray-900 border-gray-600 text-gray-400 hover:border-gray-500'
-                  }`}
-                >
-                  🔥 Stress Test
-                  <p className="text-xs mt-1 font-normal opacity-70">Ramp up users</p>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFormData({...formData, test_type: 'scalability'})}
-                  className={`py-3 px-4 rounded-xl text-sm font-semibold transition-all border ${
-                    formData.test_type === 'scalability'
-                      ? 'bg-cyan-600 border-cyan-500 text-white shadow-lg shadow-cyan-500/20'
-                      : 'bg-gray-900 border-gray-600 text-gray-400 hover:border-gray-500'
-                  }`}
-                >
-                  📈 Scalability
-                  <p className="text-xs mt-1 font-normal opacity-70">Step-wise users</p>
-                </button>
-              </div>
+              <input
+                type="number"
+                min="1"
+                className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-purple-500 outline-none"
+                value={formData.virtual_users || ''}
+                onChange={e => {
+                  const val = e.target.value;
+                  setFormData({...formData, virtual_users: val === '' ? 0 : parseInt(val, 10) || 0});
+                }}
+              />
             </div>
 
-            {/* Virtual Users — สำหรับ Load Test */}
-            {formData.test_type === 'load' && (
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-300 flex items-center">
-                  <Users className="w-4 h-4 mr-2 text-purple-400" /> Virtual Users
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-purple-500 outline-none"
-                  value={formData.virtual_users || ''}
-                  onChange={e => {
-                    const val = e.target.value;
-                    setFormData({...formData, virtual_users: val === '' ? 0 : parseInt(val, 10) || 0});
-                  }}
-                />
-              </div>
-            )}
+            {/* Duration */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-300 flex items-center">
+                <Clock className="w-4 h-4 mr-2 text-green-400" /> Duration (Seconds)
+              </label>
+              <input
+                type="number"
+                min="1"
+                className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-green-500 outline-none"
+                value={formData.duration || ''}
+                onChange={e => {
+                  const val = e.target.value;
+                  setFormData({...formData, duration: val === '' ? 0 : parseInt(val, 10) || 0});
+                }}
+              />
+            </div>
 
-            {/* Duration — สำหรับ Load Test เท่านั้น */}
-            {formData.test_type === 'load' && (
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-300 flex items-center">
-                  <Clock className="w-4 h-4 mr-2 text-green-400" /> Duration (Seconds)
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-green-500 outline-none"
-                  value={formData.duration || ''}
-                  onChange={e => {
-                    const val = e.target.value;
-                    setFormData({...formData, duration: val === '' ? 0 : parseInt(val, 10) || 0});
-                  }}
-                />
-              </div>
-            )}
-
-            {/* Stress Test Inputs */}
-            {formData.test_type === 'stress' && (
-              <>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-300 flex items-center">
-                    <Users className="w-4 h-4 mr-2 text-red-400" /> Max Users
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-red-500 outline-none"
-                    value={formData.max_users || ''}
-                    onChange={e => {
-                      const val = e.target.value;
-                      setFormData({...formData, max_users: val === '' ? 0 : parseInt(val, 10) || 0});
-                    }}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-300 flex items-center">
-                    <Activity className="w-4 h-4 mr-2 text-orange-400" /> Ramp Up (sec/stage)
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-orange-500 outline-none"
-                    value={formData.ramp_up_duration || ''}
-                    onChange={e => {
-                      const val = e.target.value;
-                      setFormData({...formData, ramp_up_duration: val === '' ? 0 : parseInt(val, 10) || 0});
-                    }}
-                  />
-                </div>
-                <div className="col-span-1 md:col-span-2 space-y-2">
-                  <label className="text-sm font-medium text-gray-300 flex items-center">
-                    <Clock className="w-4 h-4 mr-2 text-yellow-400" /> Hold Duration (sec)
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-yellow-500 outline-none"
-                    value={formData.hold_duration || ''}
-                    onChange={e => {
-                      const val = e.target.value;
-                      setFormData({...formData, hold_duration: val === '' ? 0 : parseInt(val, 10) || 0});
-                    }}
-                  />
-                </div>
-
-                {/* Stage Preview */}
-                <div className="col-span-1 md:col-span-2 bg-gray-900 rounded-xl p-4 border border-gray-700">
-                  <p className="text-xs text-gray-400 mb-2">📋 Stress Test Stages:</p>
-                  <div className="flex items-center gap-2 text-xs flex-wrap">
-                    <span className="bg-blue-900/50 text-blue-300 px-2 py-1 rounded">↗ {Math.round(formData.max_users * 0.2)} users ({formData.ramp_up_duration}s)</span>
-                    <span className="text-gray-600">→</span>
-                    <span className="bg-purple-900/50 text-purple-300 px-2 py-1 rounded">↗ {Math.round(formData.max_users * 0.5)} users ({formData.ramp_up_duration}s)</span>
-                    <span className="text-gray-600">→</span>
-                    <span className="bg-red-900/50 text-red-300 px-2 py-1 rounded">↗ {formData.max_users} users ({formData.ramp_up_duration}s)</span>
-                    <span className="text-gray-600">→</span>
-                    <span className="bg-orange-900/50 text-orange-300 px-2 py-1 rounded">⏸ Hold ({formData.hold_duration}s)</span>
-                    <span className="text-gray-600">→</span>
-                    <span className="bg-green-900/50 text-green-300 px-2 py-1 rounded">↘ 0 users ({formData.ramp_up_duration}s)</span>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-2">Total Duration: {(formData.ramp_up_duration * 4) + formData.hold_duration}s</p>
-                </div>
-              </>
-            )}
-
-            {/* Scalability Test Inputs */}
-            {formData.test_type === 'scalability' && (
-              <>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-300 flex items-center">
-                    <Users className="w-4 h-4 mr-2 text-cyan-400" /> Start Users
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-cyan-500 outline-none"
-                    value={formData.start_users || ''}
-                    onChange={e => {
-                      const val = e.target.value;
-                      setFormData({...formData, start_users: val === '' ? 0 : parseInt(val, 10) || 0});
-                    }}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-300 flex items-center">
-                    <Users className="w-4 h-4 mr-2 text-cyan-400" /> End Users
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-cyan-500 outline-none"
-                    value={formData.end_users || ''}
-                    onChange={e => {
-                      const val = e.target.value;
-                      setFormData({...formData, end_users: val === '' ? 0 : parseInt(val, 10) || 0});
-                    }}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-300 flex items-center">
-                    <Activity className="w-4 h-4 mr-2 text-teal-400" /> Step Size (users)
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-teal-500 outline-none"
-                    value={formData.step_size || ''}
-                    onChange={e => {
-                      const val = e.target.value;
-                      setFormData({...formData, step_size: val === '' ? 0 : parseInt(val, 10) || 0});
-                    }}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-300 flex items-center">
-                    <Clock className="w-4 h-4 mr-2 text-teal-400" /> Step Duration (sec)
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-teal-500 outline-none"
-                    value={formData.step_duration || ''}
-                    onChange={e => {
-                      const val = e.target.value;
-                      setFormData({...formData, step_duration: val === '' ? 0 : parseInt(val, 10) || 0});
-                    }}
-                  />
-                </div>
-
-                {/* Step Preview */}
-                <div className="col-span-1 md:col-span-2 bg-gray-900 rounded-xl p-4 border border-gray-700 min-w-0 overflow-hidden">
-                  <p className="text-xs text-gray-400 mb-2">📋 Scalability Test Steps:</p>
-                  <div className="overflow-x-auto pb-2">
-                    <div className="flex items-center gap-2 text-xs whitespace-nowrap">
-                      {Array.from({ length: Math.ceil((formData.end_users - formData.start_users) / (formData.step_size || 1)) + 1 }, (_, i) => {
-                        const users = Math.min(formData.start_users + i * formData.step_size, formData.end_users);
-                        return (
-                          <span key={i} className="flex items-center gap-1">
-                            {i > 0 && <span className="text-gray-600">→</span>}
-                            <span className="bg-cyan-900/50 text-cyan-300 px-2 py-1 rounded">
-                              {users} users ({formData.step_duration}s)
-                            </span>
-                          </span>
-                        );
-                      })}
-                      <span className="text-gray-600">→</span>
-                      <span className="bg-green-900/50 text-green-300 px-2 py-1 rounded">↘ 0 users (10s)</span>
-                    </div>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-2">
-                    Total Duration: {(Math.ceil((formData.end_users - formData.start_users) / (formData.step_size || 1)) + 1) * formData.step_duration + 10}s
-                  </p>
-                </div>
-              </>
-            )}
           </div>
 
           <button
@@ -483,7 +275,7 @@ export default function LoadTest() {
               </>
             ) : (
               <>
-                <Play className="fill-current" /> Start {formData.test_type === 'stress' ? 'Stress' : formData.test_type === 'scalability' ? 'Scalability' : 'Load'} Test
+                <Play className="fill-current" /> Start Load Test
               </>
             )}
           </button>
@@ -511,7 +303,7 @@ export default function LoadTest() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
             <div className="bg-gray-900 p-4 rounded-xl text-center">
               <p className="text-gray-400 text-xs mb-1">Users</p>
               <p className="text-2xl font-bold text-purple-400">{progress.current_users}</p>
@@ -536,6 +328,26 @@ export default function LoadTest() {
             </div>
           </div>
 
+          {/* Percentile + Throughput Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div className="bg-gray-900 p-3 rounded-xl text-center border border-gray-700">
+              <p className="text-gray-500 text-xs mb-1">Median (p50)</p>
+              <p className="text-lg font-bold text-blue-300">{progress.median_response_time} ms</p>
+            </div>
+            <div className="bg-gray-900 p-3 rounded-xl text-center border border-orange-900/50">
+              <p className="text-gray-500 text-xs mb-1">p95</p>
+              <p className="text-lg font-bold text-orange-400">{progress.p95_response_time} ms</p>
+            </div>
+            <div className="bg-gray-900 p-3 rounded-xl text-center border border-red-900/50">
+              <p className="text-gray-500 text-xs mb-1">p99</p>
+              <p className="text-lg font-bold text-red-400">{progress.p99_response_time} ms</p>
+            </div>
+            <div className="bg-gray-900 p-3 rounded-xl text-center border border-green-900/50">
+              <p className="text-gray-500 text-xs mb-1">Throughput</p>
+              <p className="text-lg font-bold text-green-400">{progress.throughput} req/s</p>
+            </div>
+          </div>
+
           {/* Real-time Charts — แสดงขณะทดสอบ */}
           {progressHistory.length > 1 && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -557,6 +369,10 @@ export default function LoadTest() {
                       <Line type="monotone" dataKey="responseTime" name="Avg (ms)"
                         stroke="#3b82f6" strokeWidth={2} dot={false}
                         isAnimationActive={false}/>
+                      <Line type="monotone" dataKey="p95" name="p95 (ms)"
+                        stroke="#f97316" strokeWidth={2} dot={false} strokeDasharray="5 3"
+                        isAnimationActive={false}/>
+                      <Legend />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>

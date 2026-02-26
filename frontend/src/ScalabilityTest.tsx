@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { 
   Layers, Globe, Users, Clock, Play, CheckCircle, 
-  Activity, AlertTriangle, ArrowUpRight
+  Activity, AlertTriangle, ArrowUpRight, FileText
 } from 'lucide-react';
 import {
   LineChart, Line,
@@ -15,15 +15,26 @@ interface TestResult {
   status: string;
   avg_response_time: number;
   error_rate: number;
+  p95_response_time?: number;
+  p99_response_time?: number;
+  min_response_time?: number;
+  max_response_time?: number;
+  throughput?: number;
+  total_requests?: number;
+  failed_requests?: number;
+  virtual_users?: number;
+  duration?: number;
+  test_history_id?: number;
+  median_response_time?: number;
 }
 
 export default function ScalabilityTest() {
   const [formData, setFormData] = useState({
-    target_url: 'http://localhost:5173',
-    start_users: 10,
-    end_users: 100,
-    step_size: 10,
-    step_duration: 30,
+    target_url: '',
+    start_users: 0,
+    end_users: 0,
+    step_size: 0,
+    step_duration: 0,
   });
   
   const [loading, setLoading] = useState(false);
@@ -37,12 +48,17 @@ export default function ScalabilityTest() {
     current_users: 0,
     requests_per_sec: 0,
     current_response_time: 0,
-    current_error_rate: 0
+    current_error_rate: 0,
+    median_response_time: 0,
+    p95_response_time: 0,
+    p99_response_time: 0,
+    throughput: 0,
   });
 
   const [progressHistory, setProgressHistory] = useState<{
     users: number;
     responseTime: number;
+    p95: number;
     errorRate: number;
   }[]>([]);
 
@@ -55,14 +71,16 @@ export default function ScalabilityTest() {
     }
   };
 
-  // จำนวน steps ทั้งหมด
+  // จำนวน steps ทั้งหมด (guard division by zero)
   const getStepCount = () => {
-    return Math.ceil((formData.end_users - formData.start_users) / formData.step_size) + 1;
+    if (!formData.step_size || formData.step_size <= 0) return 1;
+    if (formData.end_users <= formData.start_users) return 1;
+    return Math.min(Math.ceil((formData.end_users - formData.start_users) / formData.step_size) + 1, 100);
   };
 
   // Total duration
   const getTotalDuration = () => {
-    return getStepCount() * formData.step_duration + 10; // +10 ramp down
+    return getStepCount() * (formData.step_duration || 0) + 10; // +10 ramp down
   };
 
   // Scalability Score (0-100): วัดว่า response time เพิ่มขึ้นแบบ linear หรือ exponential
@@ -86,6 +104,33 @@ export default function ScalabilityTest() {
     return score;
   };
 
+  // Generate Report — เปิดหน้า Report พร้อมส่งข้อมูลผลลัพธ์
+  const handleGenerateReport = () => {
+    if (!currentResult) return;
+    
+    const reportData = {
+      test_type: currentResult.test_type || 'scalability',
+      target_url: currentResult.target_url || formData.target_url,
+      virtual_users: currentResult.virtual_users || formData.end_users,
+      duration: currentResult.duration || getTotalDuration(),
+      status: currentResult.status,
+      avg_response_time: currentResult.avg_response_time,
+      min_response_time: currentResult.min_response_time || 0,
+      median_response_time: currentResult.median_response_time || 0,
+      p95_response_time: currentResult.p95_response_time || 0,
+      p99_response_time: currentResult.p99_response_time || 0,
+      max_response_time: currentResult.max_response_time || 0,
+      throughput: currentResult.throughput || 0,
+      total_requests: currentResult.total_requests || 0,
+      failed_requests: currentResult.failed_requests || 0,
+      error_rate: currentResult.error_rate,
+      test_history_id: currentResult.test_history_id || 0,
+    };
+
+    localStorage.setItem('pendingReportData', JSON.stringify(reportData));
+    window.dispatchEvent(new CustomEvent('navigate', { detail: 'report' }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isValidUrl(formData.target_url)) {
@@ -96,7 +141,7 @@ export default function ScalabilityTest() {
     const totalDuration = getTotalDuration();
     setLoading(true);
     setCurrentResult(null);
-    setProgress({ percent: 0, elapsed: 0, total: totalDuration, current_users: 0, requests_per_sec: 0, current_response_time: 0, current_error_rate: 0 });
+    setProgress({ percent: 0, elapsed: 0, total: totalDuration, current_users: 0, requests_per_sec: 0, current_response_time: 0, current_error_rate: 0, median_response_time: 0, p95_response_time: 0, p99_response_time: 0, throughput: 0 });
     setProgressHistory([]);
 
     const token = localStorage.getItem("token");
@@ -129,6 +174,7 @@ export default function ScalabilityTest() {
             return [...prev, {
               users: data.current_users,
               responseTime: data.current_response_time,
+              p95: data.p95_response_time,
               errorRate: data.current_error_rate,
             }];
           }
@@ -206,7 +252,7 @@ export default function ScalabilityTest() {
               <input
                 type="number" min="1"
                 className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-green-500 outline-none"
-                value={formData.start_users}
+                value={formData.start_users || ''}
                 onChange={e => setFormData({...formData, start_users: Number(e.target.value)})}
               />
             </div>
@@ -219,7 +265,7 @@ export default function ScalabilityTest() {
               <input
                 type="number" min="1"
                 className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-red-500 outline-none"
-                value={formData.end_users}
+                value={formData.end_users || ''}
                 onChange={e => setFormData({...formData, end_users: Number(e.target.value)})}
               />
             </div>
@@ -232,7 +278,7 @@ export default function ScalabilityTest() {
               <input
                 type="number" min="1"
                 className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-cyan-500 outline-none"
-                value={formData.step_size}
+                value={formData.step_size || ''}
                 onChange={e => setFormData({...formData, step_size: Number(e.target.value)})}
               />
             </div>
@@ -245,7 +291,7 @@ export default function ScalabilityTest() {
               <input
                 type="number" min="5"
                 className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-yellow-500 outline-none"
-                value={formData.step_duration}
+                value={formData.step_duration || ''}
                 onChange={e => setFormData({...formData, step_duration: Number(e.target.value)})}
               />
             </div>
@@ -347,6 +393,26 @@ export default function ScalabilityTest() {
             </div>
           </div>
 
+          {/* Percentile + Throughput Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+            <div className="bg-gray-900 p-3 rounded-xl text-center border border-gray-700">
+              <p className="text-gray-500 text-xs mb-1">Median (p50)</p>
+              <p className="text-lg font-bold text-blue-300">{progress.median_response_time} ms</p>
+            </div>
+            <div className="bg-gray-900 p-3 rounded-xl text-center border border-orange-900/50">
+              <p className="text-gray-500 text-xs mb-1">p95</p>
+              <p className="text-lg font-bold text-orange-400">{progress.p95_response_time} ms</p>
+            </div>
+            <div className="bg-gray-900 p-3 rounded-xl text-center border border-red-900/50">
+              <p className="text-gray-500 text-xs mb-1">p99</p>
+              <p className="text-lg font-bold text-red-400">{progress.p99_response_time} ms</p>
+            </div>
+            <div className="bg-gray-900 p-3 rounded-xl text-center border border-green-900/50">
+              <p className="text-gray-500 text-xs mb-1">Throughput</p>
+              <p className="text-lg font-bold text-green-400">{progress.throughput} req/s</p>
+            </div>
+          </div>
+
           {/* Real-time Chart: Response Time vs Users */}
           <div className="mt-6 bg-gray-900 p-4 rounded-xl border border-gray-700">
             <h4 className="text-sm font-bold text-gray-300 mb-3 flex items-center gap-2">
@@ -360,7 +426,8 @@ export default function ScalabilityTest() {
                   <YAxis stroke="#3b82f6" tick={{fontSize: 10}} label={{ value: 'ms', angle: -90, position: 'insideLeft', fill: '#3b82f6' }}/>
                   <Tooltip contentStyle={{backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px'}} labelFormatter={(v) => `${v} Users`}/>
                   <Legend />
-                  <Line type="monotone" dataKey="responseTime" name="Response Time (ms)" stroke="#06b6d4" strokeWidth={2} dot={{ fill: '#06b6d4', r: 4 }} isAnimationActive={false}/>
+                  <Line type="monotone" dataKey="responseTime" name="Avg (ms)" stroke="#06b6d4" strokeWidth={2} dot={{ fill: '#06b6d4', r: 4 }} isAnimationActive={false}/>
+                  <Line type="monotone" dataKey="p95" name="p95 (ms)" stroke="#f97316" strokeWidth={2} dot={{ fill: '#f97316', r: 3 }} strokeDasharray="5 3" isAnimationActive={false}/>
                   <Line type="monotone" dataKey="errorRate" name="Error Rate (%)" stroke="#ef4444" strokeWidth={2} dot={{ fill: '#ef4444', r: 3 }} isAnimationActive={false}/>
                 </LineChart>
               </ResponsiveContainer>
@@ -478,6 +545,13 @@ export default function ScalabilityTest() {
               </div>
             </div>
           </div>
+          {/* Generate Report Button */}
+          <button
+            onClick={handleGenerateReport}
+            className="w-full py-4 text-lg font-bold rounded-xl shadow-lg bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white hover:scale-[1.01] active:scale-95 transition-all flex items-center justify-center gap-3 mt-6"
+          >
+            <FileText /> Generate Report
+          </button>
         </div>
       )}
     </div>

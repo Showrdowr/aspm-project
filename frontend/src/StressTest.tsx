@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { 
   Flame, Globe, Users, Clock, Play, CheckCircle, 
-  Activity, AlertTriangle, TrendingUp
+  Activity, AlertTriangle, TrendingUp, FileText
 } from 'lucide-react';
 import {
   LineChart, Line,
@@ -15,14 +15,25 @@ interface TestResult {
   status: string;
   avg_response_time: number;
   error_rate: number;
+  p95_response_time?: number;
+  p99_response_time?: number;
+  min_response_time?: number;
+  max_response_time?: number;
+  throughput?: number;
+  total_requests?: number;
+  failed_requests?: number;
+  virtual_users?: number;
+  duration?: number;
+  test_history_id?: number;
+  median_response_time?: number;
 }
 
 export default function StressTest() {
   const [formData, setFormData] = useState({
-    target_url: 'http://localhost:5173',
-    max_users: 50,
-    ramp_up_duration: 15,
-    hold_duration: 30,
+    target_url: '',
+    max_users: 0,
+    ramp_up_duration: 0,
+    hold_duration: 0,
   });
   
   const [loading, setLoading] = useState(false);
@@ -36,13 +47,18 @@ export default function StressTest() {
     current_users: 0,
     requests_per_sec: 0,
     current_response_time: 0,
-    current_error_rate: 0
+    current_error_rate: 0,
+    median_response_time: 0,
+    p95_response_time: 0,
+    p99_response_time: 0,
+    throughput: 0,
   });
 
   const [progressHistory, setProgressHistory] = useState<{
     time: number;
     users: number;
     responseTime: number;
+    p95: number;
     errorRate: number;
   }[]>([]);
 
@@ -62,6 +78,33 @@ export default function StressTest() {
     return rampUp * 4 + hold; // 4 ramp stages + hold
   };
 
+  // Generate Report — เปิดหน้า Report พร้อมส่งข้อมูลผลลัพธ์
+  const handleGenerateReport = () => {
+    if (!currentResult) return;
+    
+    const reportData = {
+      test_type: currentResult.test_type || 'stress',
+      target_url: currentResult.target_url || formData.target_url,
+      virtual_users: currentResult.virtual_users || formData.max_users,
+      duration: currentResult.duration || getTotalDuration(),
+      status: currentResult.status,
+      avg_response_time: currentResult.avg_response_time,
+      min_response_time: currentResult.min_response_time || 0,
+      median_response_time: currentResult.median_response_time || 0,
+      p95_response_time: currentResult.p95_response_time || 0,
+      p99_response_time: currentResult.p99_response_time || 0,
+      max_response_time: currentResult.max_response_time || 0,
+      throughput: currentResult.throughput || 0,
+      total_requests: currentResult.total_requests || 0,
+      failed_requests: currentResult.failed_requests || 0,
+      error_rate: currentResult.error_rate,
+      test_history_id: currentResult.test_history_id || 0,
+    };
+
+    localStorage.setItem('pendingReportData', JSON.stringify(reportData));
+    window.dispatchEvent(new CustomEvent('navigate', { detail: 'report' }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isValidUrl(formData.target_url)) {
@@ -72,7 +115,7 @@ export default function StressTest() {
     const totalDuration = getTotalDuration();
     setLoading(true);
     setCurrentResult(null);
-    setProgress({ percent: 0, elapsed: 0, total: totalDuration, current_users: 0, requests_per_sec: 0, current_response_time: 0, current_error_rate: 0 });
+    setProgress({ percent: 0, elapsed: 0, total: totalDuration, current_users: 0, requests_per_sec: 0, current_response_time: 0, current_error_rate: 0, median_response_time: 0, p95_response_time: 0, p99_response_time: 0, throughput: 0 });
     setProgressHistory([]);
 
     const token = localStorage.getItem("token");
@@ -99,6 +142,7 @@ export default function StressTest() {
           time: data.elapsed,
           users: data.current_users,
           responseTime: data.current_response_time,
+          p95: data.p95_response_time,
           errorRate: data.current_error_rate,
         }]);
       }
@@ -190,7 +234,7 @@ export default function StressTest() {
                 type="number"
                 min="5"
                 className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-orange-500 outline-none"
-                value={formData.max_users}
+                value={formData.max_users || ''}
                 onChange={e => setFormData({...formData, max_users: Number(e.target.value)})}
               />
             </div>
@@ -204,7 +248,7 @@ export default function StressTest() {
                 type="number"
                 min="5"
                 className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-yellow-500 outline-none"
-                value={formData.ramp_up_duration}
+                value={formData.ramp_up_duration || ''}
                 onChange={e => setFormData({...formData, ramp_up_duration: Number(e.target.value)})}
               />
             </div>
@@ -218,7 +262,7 @@ export default function StressTest() {
                 type="number"
                 min="5"
                 className="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-green-500 outline-none"
-                value={formData.hold_duration}
+                value={formData.hold_duration || ''}
                 onChange={e => setFormData({...formData, hold_duration: Number(e.target.value)})}
               />
             </div>
@@ -314,6 +358,26 @@ export default function StressTest() {
             </div>
           </div>
 
+          {/* Percentile + Throughput Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+            <div className="bg-gray-900 p-3 rounded-xl text-center border border-gray-700">
+              <p className="text-gray-500 text-xs mb-1">Median (p50)</p>
+              <p className="text-lg font-bold text-blue-300">{progress.median_response_time} ms</p>
+            </div>
+            <div className="bg-gray-900 p-3 rounded-xl text-center border border-orange-900/50">
+              <p className="text-gray-500 text-xs mb-1">p95</p>
+              <p className="text-lg font-bold text-orange-400">{progress.p95_response_time} ms</p>
+            </div>
+            <div className="bg-gray-900 p-3 rounded-xl text-center border border-red-900/50">
+              <p className="text-gray-500 text-xs mb-1">p99</p>
+              <p className="text-lg font-bold text-red-400">{progress.p99_response_time} ms</p>
+            </div>
+            <div className="bg-gray-900 p-3 rounded-xl text-center border border-green-900/50">
+              <p className="text-gray-500 text-xs mb-1">Throughput</p>
+              <p className="text-lg font-bold text-green-400">{progress.throughput} req/s</p>
+            </div>
+          </div>
+
           {/* Real-time Charts */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
             {/* Response Time over Time */}
@@ -330,7 +394,8 @@ export default function StressTest() {
                     <YAxis yAxisId="right" orientation="right" stroke="#f97316" tick={{fontSize: 10}} label={{ value: 'users', angle: 90, position: 'insideRight', fill: '#f97316' }}/>
                     <Tooltip contentStyle={{backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px'}} labelFormatter={(v) => `${v}s`}/>
                     <Legend />
-                    <Line yAxisId="left" type="monotone" dataKey="responseTime" name="Response Time (ms)" stroke="#3b82f6" strokeWidth={2} dot={false} isAnimationActive={false}/>
+                    <Line yAxisId="left" type="monotone" dataKey="responseTime" name="Avg (ms)" stroke="#3b82f6" strokeWidth={2} dot={false} isAnimationActive={false}/>
+                    <Line yAxisId="left" type="monotone" dataKey="p95" name="p95 (ms)" stroke="#fb923c" strokeWidth={2} dot={false} strokeDasharray="5 3" isAnimationActive={false}/>
                     <Line yAxisId="right" type="monotone" dataKey="users" name="Active Users" stroke="#f97316" strokeWidth={2} dot={false} strokeDasharray="5 5" isAnimationActive={false}/>
                   </LineChart>
                 </ResponsiveContainer>
@@ -440,6 +505,13 @@ export default function StressTest() {
               </div>
             </div>
           </div>
+          {/* Generate Report Button */}
+          <button
+            onClick={handleGenerateReport}
+            className="w-full py-4 text-lg font-bold rounded-xl shadow-lg bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white hover:scale-[1.01] active:scale-95 transition-all flex items-center justify-center gap-3 mt-6"
+          >
+            <FileText /> Generate Report
+          </button>
         </div>
       )}
     </div>

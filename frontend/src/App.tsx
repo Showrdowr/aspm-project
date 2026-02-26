@@ -15,42 +15,74 @@ function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem("token"));
   const [username, setUsername] = useState<string>(localStorage.getItem("username") || "Guest");
   const [currentView, setCurrentView] = useState<'login' | 'register'>('login');
+  const [verifying, setVerifying] = useState(() => !!localStorage.getItem("token")); // true เฉพาะเมื่อมี token ให้ verify
 
-  // State สำหรับ Dashboard Navigation
-  // dashboard = หน้าแรก, load = หน้า Load Test
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'load' | 'stress' | 'scalability' | 'report' | 'history'>('dashboard');
+  // State สำหรับ Dashboard Navigation — อ่านจาก localStorage เพื่อให้ refresh แล้วอยู่หน้าเดิม
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'load' | 'stress' | 'scalability' | 'report' | 'history'>(() => {
+    const saved = localStorage.getItem('activeTab');
+    return (saved as 'dashboard' | 'load' | 'stress' | 'scalability' | 'report' | 'history') || 'dashboard';
+  });
   
   // State สำหรับ Status Bar
   const [message, setMessage] = useState<string>("Connecting...");
   const [dbStatus, setDbStatus] = useState<string>("Checking DB...");
+
+  // บันทึก activeTab ลง localStorage ทุกครั้งที่เปลี่ยน
+  useEffect(() => {
+    localStorage.setItem('activeTab', activeTab);
+  }, [activeTab]);
 
   const handleLoginSuccess = (newToken: string, newUsername: string) => {
     localStorage.setItem("token", newToken);
     localStorage.setItem("username", newUsername);
     setToken(newToken);
     setUsername(newUsername);
+    setVerifying(false);
   };
 
   const handleLogout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("username");
+    localStorage.removeItem("activeTab");
     setToken(null);
     setUsername("");
     setCurrentView('login');
-    setActiveTab('dashboard'); // รีเซ็ตหน้ากลับไปหน้าแรก
+    setActiveTab('dashboard');
   };
 
+  // Verify token กับ backend เมื่อเริ่มโปรแกรม
   useEffect(() => {
-    if (token) {
-      axios.get('http://localhost:3002/api/health')
-        .then(res => setMessage(res.data.status || "Online"))
-        .catch(() => setMessage("Offline"));
-
-      axios.get('http://localhost:3002/api/health/db')
-        .then(res => setDbStatus(res.data.database || "Connected"))
-        .catch(() => setDbStatus("Disconnected"));
+    const storedToken = localStorage.getItem("token");
+    if (!storedToken) {
+      return;
     }
-  }, [token]);
+
+    axios.get('http://localhost:3002/api/auth/verify', {
+      headers: { Authorization: `Bearer ${storedToken}` }
+    })
+      .then(res => {
+        if (res.data.valid) {
+          setToken(storedToken);
+          setUsername(res.data.username || localStorage.getItem("username") || "Guest");
+          setVerifying(false);
+
+          // ตรวจสอบสถานะ server + DB
+          axios.get('http://localhost:3002/api/health')
+            .then(r => setMessage(r.data.status || "Online"))
+            .catch(() => setMessage("Offline"));
+          axios.get('http://localhost:3002/api/health/db')
+            .then(r => setDbStatus(r.data.database || "Connected"))
+            .catch(() => setDbStatus("Disconnected"));
+        } else {
+          handleLogout();
+          setVerifying(false);
+        }
+      })
+      .catch(() => {
+        handleLogout();
+        setVerifying(false);
+      });
+  }, []);
 
   // Listen for custom navigate events (from LoadTest/StressTest/ScalabilityTest)
   useEffect(() => {
@@ -63,6 +95,18 @@ function App() {
     window.addEventListener('navigate', handleNavigate);
     return () => window.removeEventListener('navigate', handleNavigate);
   }, []);
+
+  // แสดง loading ระหว่างตรวจสอบ token
+  if (verifying) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-900">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-400 text-sm">Verifying session...</p>
+        </div>
+      </div>
+    );
+  }
 
   // --- Logic สลับหน้า Login/Register ---
   if (!token) {

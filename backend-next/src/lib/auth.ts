@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-key-change-in-production';
 
 // สร้าง JWT token
 export function generateToken(payload: { userId: number; username: string }): string {
@@ -11,8 +11,11 @@ export function generateToken(payload: { userId: number; username: string }): st
 // ตรวจสอบ JWT token
 export function verifyToken(token: string): { userId: number; username: string } | null {
   try {
-    return jwt.verify(token, JWT_SECRET) as { userId: number; username: string };
-  } catch {
+    const decoded = jwt.verify(token, JWT_SECRET) as { userId: number; username: string };
+    return decoded;
+  } catch (err) {
+    console.error('[Auth] Token verification failed:', err instanceof Error ? err.message : 'Unknown error');
+    console.log('[Auth] Using JWT_SECRET (first 6 chars):', JWT_SECRET.substring(0, 6) + '...');
     return null;
   }
 }

@@ -46,12 +46,20 @@ export async function GET(request: NextRequest) {
       let totalResponseTime = 0;
       let minResponseTime = Infinity;
       let maxResponseTime = 0;
+      const responseTimes: number[] = []; // เก็บทุกค่าสำหรับ percentile (sorted)
       let totalRequests = 0;
       let failedRequests = 0;
       let currentVuActive = testType === 'load' ? virtualUsers : 0;
       // ตัวแปรสำหรับ per-second tracking
       let lastSecondRequests = 0;
       let currentRps = 0;
+      
+      // ฟังก์ชันคำนวณ percentile จาก sorted array
+      function getPercentile(sortedArr: number[], p: number): number {
+        if (sortedArr.length === 0) return 0;
+        const index = Math.ceil((p / 100) * sortedArr.length) - 1;
+        return parseFloat(sortedArr[Math.max(0, index)].toFixed(2));
+      }
       
       // ส่ง event เริ่มต้น
       controller.enqueue(encoder.encode(`data: ${JSON.stringify({
@@ -112,6 +120,12 @@ export async function GET(request: NextRequest) {
                 totalRequests++;
                 totalResponseTime += metric.response_time;
                 
+                // Insert sorted สำหรับ percentile calculation
+                const rt = metric.response_time;
+                const insertIdx = responseTimes.findIndex(v => v >= rt);
+                if (insertIdx === -1) responseTimes.push(rt);
+                else responseTimes.splice(insertIdx, 0, rt);
+                
                 if (metric.response_time < minResponseTime) {
                   minResponseTime = metric.response_time;
                 }
@@ -166,6 +180,10 @@ export async function GET(request: NextRequest) {
           current_min_response_time: minResponseTime === Infinity ? 0 : parseFloat(minResponseTime.toFixed(2)),
           current_max_response_time: parseFloat(maxResponseTime.toFixed(2)),
           current_error_rate: errorRate,
+          median_response_time: getPercentile(responseTimes, 50),
+          p95_response_time: getPercentile(responseTimes, 95),
+          p99_response_time: getPercentile(responseTimes, 99),
+          throughput: elapsed > 0 ? parseFloat((totalRequests / elapsed).toFixed(2)) : 0,
           total_requests: totalRequests,
         })}\n\n`));
       }, 1000);
@@ -188,10 +206,11 @@ export async function GET(request: NextRequest) {
           ? parseFloat(((failedRequests / totalRequests) * 100).toFixed(2))
           : parseFloat(output.match(/http_req_failed.*:\s*([\d.]+)%/)?.[1] || '0');
         
-        // Parse extended metrics from k6 summary (p95/p99 only available from summary)
+        // Parse extended metrics - prefer real-time tracked data, fallback to k6 summary regex
         const finalMinResponseTime = minResponseTime !== Infinity ? parseFloat(minResponseTime.toFixed(2)) : parseFloat(output.match(/http_req_duration.*min=([\d.]+)/)?.[1] || '0');
-        const p95ResponseTime = parseFloat(output.match(/http_req_duration.*p\(95\)=([\d.]+)/)?.[1] || '0');
-        const p99ResponseTime = parseFloat(output.match(/http_req_duration.*p\(99\)=([\d.]+)/)?.[1] || '0');
+        const finalMedianResponseTime = responseTimes.length > 0 ? getPercentile(responseTimes, 50) : parseFloat(output.match(/http_req_duration.*med=([\d.]+)/)?.[1] || '0');
+        const p95ResponseTime = responseTimes.length > 0 ? getPercentile(responseTimes, 95) : parseFloat(output.match(/http_req_duration.*p\(95\)=([\d.]+)/)?.[1] || '0');
+        const p99ResponseTime = responseTimes.length > 0 ? getPercentile(responseTimes, 99) : parseFloat(output.match(/http_req_duration.*p\(99\)=([\d.]+)/)?.[1] || '0');
         const finalMaxResponseTime = maxResponseTime > 0 ? parseFloat(maxResponseTime.toFixed(2)) : parseFloat(output.match(/http_req_duration.*max=([\d.]+)/)?.[1] || '0');
         const totalReqs = totalRequests > 0 ? totalRequests : parseInt(output.match(/http_reqs[.\s]*:\s*(\d+)/)?.[1] || '0');
         const failedReqs = failedRequests;
@@ -227,9 +246,11 @@ export async function GET(request: NextRequest) {
         // ส่ง complete event (รวม extended metrics)
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({
           type: 'complete',
+          test_type: testType,
           status,
           avg_response_time: finalAvgResponseTime,
           min_response_time: finalMinResponseTime,
+          median_response_time: finalMedianResponseTime,
           p95_response_time: p95ResponseTime,
           p99_response_time: p99ResponseTime,
           max_response_time: finalMaxResponseTime,

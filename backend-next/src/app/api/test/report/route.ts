@@ -5,9 +5,11 @@ import { query } from '@/lib/db';
 interface TestReport {
   id: number;
   test_history_id: number;
+  report_name: string;
   tester_name: string;
   test_objective: string;
   environment: string;
+  median_response_time: number;
   p95_response_time: number;
   p99_response_time: number;
   max_response_time: number;
@@ -33,9 +35,17 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const {
       test_history_id,
+      report_name,
+      test_type,
       tester_name,
+      target_url,
+      virtual_users,
+      duration,
+      avg_response_time,
+      error_rate,
       test_objective,
       environment,
+      median_response_time,
       p95_response_time,
       p99_response_time,
       max_response_time,
@@ -51,15 +61,18 @@ export async function POST(request: NextRequest) {
 
     const result = await query(
       `INSERT INTO test_reports 
-        (test_history_id, tester_name, test_objective, environment,
-         p95_response_time, p99_response_time, max_response_time, throughput,
+        (test_history_id, report_name, test_type, tester_name, target_url, virtual_users, duration, avg_response_time, error_rate,
+         test_objective, environment,
+         median_response_time, p95_response_time, p99_response_time, max_response_time, throughput,
          total_requests, failed_requests,
          sla_response_time, sla_error_rate, sla_pass,
          conclusion, recommendations)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        test_history_id, tester_name, test_objective, environment,
-        p95_response_time, p99_response_time, max_response_time, throughput,
+        test_history_id, report_name || '', test_type || '', tester_name,
+        target_url || '', virtual_users || 0, duration || 0, avg_response_time || 0, error_rate || 0,
+        test_objective, environment,
+        median_response_time || 0, p95_response_time, p99_response_time, max_response_time, throughput,
         total_requests, failed_requests,
         sla_response_time, sla_error_rate, sla_pass ? 1 : 0,
         conclusion, recommendations
@@ -90,20 +103,32 @@ export async function GET(request: NextRequest) {
     const historyId = searchParams.get('test_history_id');
 
     let sql = `
-      SELECT r.*, h.test_type, h.target_url, h.virtual_users, h.duration, 
-             h.avg_response_time, h.error_rate, h.status as test_status
+      SELECT r.*, 
+             COALESCE(NULLIF(r.test_type,''), h.test_type) as test_type,
+             COALESCE(NULLIF(r.target_url,''), h.target_url) as target_url,
+             COALESCE(NULLIF(r.virtual_users,0), h.virtual_users) as virtual_users,
+             COALESCE(NULLIF(r.duration,0), h.duration) as duration,
+             COALESCE(NULLIF(r.avg_response_time,0), h.avg_response_time) as avg_response_time,
+             COALESCE(NULLIF(r.error_rate,0), h.error_rate) as error_rate,
+             h.status as test_status
       FROM test_reports r
-      JOIN test_histories h ON r.test_history_id = h.id
+      LEFT JOIN test_histories h ON r.test_history_id = h.id
       ORDER BY r.created_at DESC
     `;
     const params: string[] = [];
 
     if (historyId) {
       sql = `
-        SELECT r.*, h.test_type, h.target_url, h.virtual_users, h.duration,
-               h.avg_response_time, h.error_rate, h.status as test_status
+        SELECT r.*, 
+               COALESCE(NULLIF(r.test_type,''), h.test_type) as test_type,
+               COALESCE(NULLIF(r.target_url,''), h.target_url) as target_url,
+               COALESCE(NULLIF(r.virtual_users,0), h.virtual_users) as virtual_users,
+               COALESCE(NULLIF(r.duration,0), h.duration) as duration,
+               COALESCE(NULLIF(r.avg_response_time,0), h.avg_response_time) as avg_response_time,
+               COALESCE(NULLIF(r.error_rate,0), h.error_rate) as error_rate,
+               h.status as test_status
         FROM test_reports r
-        JOIN test_histories h ON r.test_history_id = h.id
+        LEFT JOIN test_histories h ON r.test_history_id = h.id
         WHERE r.test_history_id = ?
         ORDER BY r.created_at DESC
       `;
@@ -116,5 +141,29 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Report fetch error:', error);
     return NextResponse.json({ error: 'Failed to fetch reports' }, { status: 500 });
+  }
+}
+
+// DELETE — ลบ report ตาม id
+export async function DELETE(request: NextRequest) {
+  try {
+    const token = extractToken(request.headers.get('authorization'));
+    if (!token || !verifyToken(token)) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+
+    if (!id) {
+      return NextResponse.json({ error: 'Missing report id' }, { status: 400 });
+    }
+
+    await query('DELETE FROM test_reports WHERE id = ?', [id]);
+    return NextResponse.json({ success: true, message: 'Report deleted successfully' });
+
+  } catch (error) {
+    console.error('Report delete error:', error);
+    return NextResponse.json({ error: 'Failed to delete report' }, { status: 500 });
   }
 }
