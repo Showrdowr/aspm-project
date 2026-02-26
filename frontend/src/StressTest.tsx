@@ -157,6 +157,16 @@ export default function StressTest() {
           status: data.status,
           avg_response_time: Math.round(data.avg_response_time),
           error_rate: Math.round(data.error_rate * 100) / 100,
+          median_response_time: Math.round(data.median_response_time || 0),
+          p95_response_time: Math.round(data.p95_response_time || 0),
+          p99_response_time: Math.round(data.p99_response_time || 0),
+          max_response_time: Math.round(data.max_response_time || 0),
+          throughput: Math.round((data.throughput || 0) * 100) / 100,
+          total_requests: data.total_requests || 0,
+          failed_requests: data.failed_requests || 0,
+          virtual_users: data.virtual_users || formData.max_users,
+          duration: data.duration || getTotalDuration(),
+          test_history_id: data.test_history_id
         });
         
         setTimeout(() => {
@@ -448,14 +458,30 @@ export default function StressTest() {
           </div>
 
           {/* Summary Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-6">
             <div className="bg-gray-900 p-6 rounded-xl border border-gray-700 text-center shadow-lg">
               <p className="text-gray-400 text-sm mb-2">Max Users Tested</p>
-              <p className="text-4xl font-bold text-orange-400">{formData.max_users}</p>
+              <p className="text-4xl font-bold text-orange-400">{currentResult.virtual_users || formData.max_users}</p>
             </div>
             <div className="bg-gray-900 p-6 rounded-xl border border-gray-700 text-center shadow-lg">
               <p className="text-gray-400 text-sm mb-2">Avg Response Time</p>
-              <p className="text-4xl font-bold text-blue-400">{currentResult.avg_response_time} ms</p>
+              <p className="text-4xl font-bold text-blue-400">{currentResult.avg_response_time} <span className="text-lg">ms</span></p>
+            </div>
+            <div className="bg-gray-900 p-6 rounded-xl border border-gray-700 text-center shadow-lg">
+              <p className="text-gray-400 text-sm mb-2">Median (p50)</p>
+              <p className="text-4xl font-bold text-sky-400">{currentResult.median_response_time || 0} <span className="text-lg">ms</span></p>
+            </div>
+            <div className="bg-gray-900 p-6 rounded-xl border border-gray-700 text-center shadow-lg">
+              <p className="text-gray-400 text-sm mb-2">P95 Response</p>
+              <p className="text-4xl font-bold text-indigo-400">{currentResult.p95_response_time || 0} <span className="text-lg">ms</span></p>
+            </div>
+            <div className="bg-gray-900 p-6 rounded-xl border border-gray-700 text-center shadow-lg">
+              <p className="text-gray-400 text-sm mb-2">P99 Response</p>
+              <p className="text-4xl font-bold text-purple-400">{currentResult.p99_response_time || 0} <span className="text-lg">ms</span></p>
+            </div>
+            <div className="bg-gray-900 p-6 rounded-xl border border-gray-700 text-center shadow-lg">
+              <p className="text-gray-400 text-sm mb-2">Throughput</p>
+              <p className="text-4xl font-bold text-green-400">{currentResult.throughput || 0} <span className="text-lg">req/s</span></p>
             </div>
             <div className="bg-gray-900 p-6 rounded-xl border border-gray-700 text-center shadow-lg">
               <p className="text-gray-400 text-sm mb-2">Error Rate</p>
