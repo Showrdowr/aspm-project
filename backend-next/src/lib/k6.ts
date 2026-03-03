@@ -49,7 +49,8 @@ function createDynamicScript(options: K6Options): string {
       { duration: '${rampUp}s', target: ${step3} },
       { duration: '${hold}s', target: ${step3} },
       { duration: '${rampUp}s', target: 0 },
-    ],`;
+    ],
+    gracefulRampDown: '0s',`;
     
   } else if (options.testType === 'scalability') {
     const start = options.startUsers || 10;
@@ -66,7 +67,8 @@ function createDynamicScript(options: K6Options): string {
     config = `
     stages: [
 ${stagesList.join(',\n')}
-    ],`;
+    ],
+    gracefulRampDown: '0s',`;
   } else {
     // Load test — ใช้ vus + duration ตรงๆ
     config = `
@@ -84,6 +86,7 @@ export const options = {${config}
     http_req_duration: ['p(95)<5000'],
     http_req_failed: ['rate<0.5'],
   },
+  gracefulStop: '0s',
 };
 
 export default function () {
@@ -123,7 +126,7 @@ export function runK6Test(options: K6Options): ChildProcess {
   
   // ใช้ shell: false + ระบุ full command เพื่อหลีกเลี่ยงปัญหา argument escaping
   const k6Path = 'k6';
-  const args = ['run', tmpFile];
+  const args = ['run', '--no-summary', tmpFile];
   
   const k6Process = spawn(k6Path, args, { 
     shell: false,

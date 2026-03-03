@@ -141,9 +141,10 @@ export default function TestReport() {
   }, []);
 
   const fetchSavedReports = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
     setLoading(true);
     try {
-      const token = localStorage.getItem('token');
       const res = await axios.get('http://localhost:3002/api/test/report', {
         headers: { Authorization: `Bearer ${token}` }
       });

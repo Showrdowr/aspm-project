@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
   const stream = new ReadableStream({
     start(controller) {
       let output = '';
-      const startTime = Date.now();
+      let startTime: number | null = null;
       
       // คำนวณ totalDuration ตาม test type
       let totalDuration = duration;
@@ -117,6 +117,7 @@ export async function GET(request: NextRequest) {
             try {
               const metric = JSON.parse(jsonStr);
               if (metric.type === 'metric') {
+                if (!startTime) startTime = Date.now();
                 totalRequests++;
                 totalResponseTime += metric.response_time;
                 
@@ -153,8 +154,8 @@ export async function GET(request: NextRequest) {
       
       // Progress updates ทุกวินาที — ส่ง real-time metrics
       const progressInterval = setInterval(() => {
-        const elapsed = Math.floor((Date.now() - startTime) / 1000);
-        const percent = Math.min(Math.floor((elapsed / totalDuration) * 100), 99);
+        const elapsed = startTime ? Math.floor((Date.now() - startTime) / 1000) : 0;
+        const percent = startTime ? Math.min(Math.floor((elapsed / totalDuration) * 100), 99) : 0;
         
         console.log(`[Stream] Progress: elapsed=${elapsed}s, totalRequests=${totalRequests}, rps=${totalRequests - lastSecondRequests}, vus=${currentVuActive}`);
         
@@ -214,7 +215,7 @@ export async function GET(request: NextRequest) {
         const finalMaxResponseTime = maxResponseTime > 0 ? parseFloat(maxResponseTime.toFixed(2)) : parseFloat(output.match(/http_req_duration.*max=([\d.]+)/)?.[1] || '0');
         const totalReqs = totalRequests > 0 ? totalRequests : parseInt(output.match(/http_reqs[.\s]*:\s*(\d+)/)?.[1] || '0');
         const failedReqs = failedRequests;
-        const elapsed = Math.round((Date.now() - startTime) / 1000);
+        const elapsed = startTime ? Math.round((Date.now() - startTime) / 1000) : 0;
         const throughput = elapsed > 0 ? parseFloat((totalReqs / elapsed).toFixed(2)) : 0;
         
         // กำหนด status — ใช้ error rate จริงแทน exit code

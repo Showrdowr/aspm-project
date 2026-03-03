@@ -27,6 +27,7 @@ export default function Dashboard({ onNavigateToLoadTest }: { onNavigateToLoadTe
     const fetchData = async () => {
       try {
         const token = localStorage.getItem("token");
+        if (!token) return;
         const res = await axios.get('http://localhost:3002/api/test/history', {
           headers: { Authorization: `Bearer ${token}` }
         });
