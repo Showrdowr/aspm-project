@@ -36,10 +36,12 @@ export async function GET(request: NextRequest) {
       // คำนวณ totalDuration ตาม test type
       let totalDuration = duration;
       if (testType === 'stress') {
-        totalDuration = (rampUpDuration * 4) + holdDuration;
+        // 5 stages + k6 overhead ~5s per stage transition
+        totalDuration = (rampUpDuration * 4) + holdDuration + 15;
       } else if (testType === 'scalability') {
         const steps = Math.ceil((endUsers - startUsers) / stepSize) + 1;
-        totalDuration = (steps * stepDuration) + 10; // +10 for cool down
+        // steps * duration + cool down + k6 overhead ~3s per step transition
+        totalDuration = (steps * stepDuration) + 10 + (steps * 2);
       }
       
       // ตัวแปรสำหรับเก็บ metrics แบบ real-time
@@ -261,7 +263,7 @@ export async function GET(request: NextRequest) {
           error_rate: finalErrorRate,
           target_url: targetUrl,
           virtual_users: virtualUsers,
-          duration: duration,
+          duration: totalDuration,
           test_history_id: insertedId,
         })}\n\n`));
         

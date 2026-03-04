@@ -7,26 +7,8 @@ import {
   LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
+import type { TestResult } from './types';
 
-interface TestResult {
-  id: number;
-  test_type: string;
-  target_url: string;
-  status: string;
-  avg_response_time: number;
-  error_rate: number;
-  p95_response_time?: number;
-  p99_response_time?: number;
-  min_response_time?: number;
-  max_response_time?: number;
-  throughput?: number;
-  total_requests?: number;
-  failed_requests?: number;
-  virtual_users?: number;
-  duration?: number;
-  test_history_id?: number;
-  median_response_time?: number;
-}
 
 export default function ScalabilityTest() {
   const [formData, setFormData] = useState({
@@ -80,7 +62,8 @@ export default function ScalabilityTest() {
 
   // Total duration
   const getTotalDuration = () => {
-    return getStepCount() * (formData.step_duration || 0) + 10; // +10 ramp down
+    const steps = getStepCount();
+    return steps * (formData.step_duration || 0) + 10 + (steps * 2); // +10 ramp down + k6 overhead buffer
   };
 
   // Scalability Score (0-100): วัดว่า response time เพิ่มขึ้นแบบ linear หรือ exponential
@@ -135,6 +118,14 @@ export default function ScalabilityTest() {
     e.preventDefault();
     if (!isValidUrl(formData.target_url)) {
       alert("❌ URL ไม่ถูกต้อง! \nกรุณาใส่ http:// หรือ https:// ให้ครบถ้วน");
+      return;
+    }
+    if (formData.start_users <= 0 || formData.end_users <= 0 || formData.step_size <= 0 || formData.step_duration <= 0) {
+      alert("กรุณากรอกค่าทุกช่องให้มากกว่า 0");
+      return;
+    }
+    if (formData.end_users <= formData.start_users) {
+      alert("End Users ต้องมากกว่า Start Users");
       return;
     }
     

@@ -38,9 +38,9 @@ export default function Register({ onSwitchToLogin }: RegisterProps) {
         onSwitchToLogin(); // สมัครเสร็จเด้งไปหน้า Login อัตโนมัติ
       }, 2000);
     } catch (err: unknown) {
-      // แสดง Error จาก Backend (เช่น Username ซ้ำ)
       if (axios.isAxiosError(err)) {
-        setError(err.response?.data?.detail || "เกิดข้อผิดพลาดในการสมัครสมาชิก");
+        const msg = err.response?.data?.error || err.response?.data?.detail || "เกิดข้อผิดพลาดในการสมัครสมาชิก";
+        setError(msg);
       } else {
         setError("เกิดข้อผิดพลาดในการสมัครสมาชิก");
       }

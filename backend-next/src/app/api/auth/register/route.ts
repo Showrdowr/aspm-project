@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
     
     if (existingUsers.length > 0) {
       return NextResponse.json(
-        { error: 'Username นี้ถูกใช้ไปแล้ว' },
+        { error: 'ชื่อผู้ใช้นี้ถูกใช้ไปแล้ว' },
         { status: 409 }
       );
     }
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
       );
       if (existingEmail.length > 0) {
         return NextResponse.json(
-          { error: 'Email นี้ถูกใช้ไปแล้ว' },
+          { error: 'อีเมลล์นี้ถูกใช้ไปแล้ว' },
           { status: 409 }
         );
       }

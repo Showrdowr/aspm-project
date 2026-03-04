@@ -7,46 +7,17 @@ import {
   LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
-
-// กำหนด Type ของข้อมูล
-interface TestResult {
-  id: number;
-  test_type: string;
-  target_url: string;
-  status: string;
-  avg_response_time: number;
-  error_rate: number;
-  p95_response_time?: number;
-  p99_response_time?: number;
-  min_response_time?: number;
-  max_response_time?: number;
-  throughput?: number;
-  total_requests?: number;
-  failed_requests?: number;
-  virtual_users?: number;
-  duration?: number;
-  test_history_id?: number;
-  median_response_time?: number;
-}
+import type { TestResult } from './types';
 
 
 
 export default function LoadTest() {
   // --- State Management ---
   const [formData, setFormData] = useState({
-    target_url: '', // ค่าเริ่มต้นว่าง
+    target_url: '',
     virtual_users: 0,
     duration: 0,
     test_type: "load",
-    // Stress test params
-    max_users: 0,
-    ramp_up_duration: 0,
-    hold_duration: 0,
-    // Scalability test params
-    start_users: 0,
-    end_users: 0,
-    step_size: 0,
-    step_duration: 0,
   });
   
   const [loading, setLoading] = useState(false);
@@ -97,6 +68,10 @@ export default function LoadTest() {
         alert("❌ URL ไม่ถูกต้อง! \nกรุณาใส่ http:// หรือ https:// ให้ครบถ้วน");
         return;
     }
+    if (formData.virtual_users <= 0 || formData.duration <= 0) {
+        alert("กรุณากรอก Virtual Users และ Duration ให้มากกว่า 0");
+        return;
+    }
     
     setLoading(true);
     setCurrentResult(null);
@@ -111,15 +86,6 @@ export default function LoadTest() {
       duration: String(formData.duration),
       test_type: formData.test_type,
       token: token || "",
-      // Stress test params
-      max_users: String(formData.max_users),
-      ramp_up_duration: String(formData.ramp_up_duration),
-      hold_duration: String(formData.hold_duration),
-      // Scalability test params
-      start_users: String(formData.start_users),
-      end_users: String(formData.end_users),
-      step_size: String(formData.step_size),
-      step_duration: String(formData.step_duration),
     });
     
     const eventSource = new EventSource(`http://localhost:3002/api/test/stream?${params}`);
@@ -142,13 +108,31 @@ export default function LoadTest() {
       } 
       else if (data.type === "complete") {
         eventSource.close();
-        setCurrentResult(data);
+        setCurrentResult({
+          id: Date.now(),
+          test_type: 'load',
+          target_url: data.target_url,
+          status: data.status,
+          avg_response_time: Math.round(data.avg_response_time),
+          error_rate: Math.round(data.error_rate * 100) / 100,
+          median_response_time: Math.round(data.median_response_time || 0),
+          p95_response_time: Math.round(data.p95_response_time || 0),
+          p99_response_time: Math.round(data.p99_response_time || 0),
+          min_response_time: Math.round(data.min_response_time || 0),
+          max_response_time: Math.round(data.max_response_time || 0),
+          throughput: Math.round((data.throughput || 0) * 100) / 100,
+          total_requests: data.total_requests || 0,
+          failed_requests: data.failed_requests || 0,
+          virtual_users: data.virtual_users || formData.virtual_users,
+          duration: data.duration || formData.duration,
+          test_history_id: data.test_history_id,
+        });
         setLoading(false);
         setProgress(prev => ({ ...prev, percent: 100 }));
         
-        if (resultSectionRef.current) {
-          resultSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
+        setTimeout(() => {
+          resultSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 300);
       }
       else if (data.type === "error") {
         eventSource.close();

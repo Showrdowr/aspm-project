@@ -7,26 +7,8 @@ import {
   LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
+import type { TestResult } from './types';
 
-interface TestResult {
-  id: number;
-  test_type: string;
-  target_url: string;
-  status: string;
-  avg_response_time: number;
-  error_rate: number;
-  p95_response_time?: number;
-  p99_response_time?: number;
-  min_response_time?: number;
-  max_response_time?: number;
-  throughput?: number;
-  total_requests?: number;
-  failed_requests?: number;
-  virtual_users?: number;
-  duration?: number;
-  test_history_id?: number;
-  median_response_time?: number;
-}
 
 export default function StressTest() {
   const [formData, setFormData] = useState({
@@ -75,7 +57,7 @@ export default function StressTest() {
   const getTotalDuration = () => {
     const rampUp = formData.ramp_up_duration;
     const hold = formData.hold_duration;
-    return rampUp * 4 + hold; // 4 ramp stages + hold
+    return rampUp * 4 + hold + 15; // 4 ramp stages + hold + k6 overhead buffer
   };
 
   // Generate Report — เปิดหน้า Report พร้อมส่งข้อมูลผลลัพธ์
@@ -109,6 +91,10 @@ export default function StressTest() {
     e.preventDefault();
     if (!isValidUrl(formData.target_url)) {
       alert("❌ URL ไม่ถูกต้อง! \nกรุณาใส่ http:// หรือ https:// ให้ครบถ้วน");
+      return;
+    }
+    if (formData.max_users <= 0 || formData.ramp_up_duration <= 0 || formData.hold_duration <= 0) {
+      alert("กรุณากรอกค่าทุกช่องให้มากกว่า 0");
       return;
     }
     
